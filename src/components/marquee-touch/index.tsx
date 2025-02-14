@@ -1,4 +1,5 @@
 import { useMemo, useEffect, useRef, useState } from 'react';
+import cx from 'clsx'
 
 import './style.less';
 
@@ -194,7 +195,11 @@ export default function MarqueeTouch({
   return (
     <div
       ref={marqueeBoxRef}
-      className={`marquee-box ${inview ? 'inview' : 'no-inview'} ${paused ? 'animation-paused' : ''}`}
+      className={cx('marquee-box', {
+        inview: inview,
+        'no-inview': !inview,
+        'animation-paused': paused,
+      })}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

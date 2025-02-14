@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import cx from 'clsx'
 
 import './style.less';
 
@@ -57,7 +58,10 @@ export default function MarqueeList({
   return (
     <div
       ref={observedElementRef}
-      className={`marquee-box ${inview ? 'inview' : 'no-inview'}`}
+      className={cx('marquee-box', {
+        inview: inview,
+        'no-inview': !inview,
+      })}
       style={{ '--duration': duration } as React.CSSProperties}
     >
       {repeatData.map((item) => (
