@@ -1,5 +1,6 @@
 module.exports = {
   plugins: {
+    tailwindcss: {},
     autoprefixer: {},
     'postcss-mobile-forever': {
       unitPrecision: 6,

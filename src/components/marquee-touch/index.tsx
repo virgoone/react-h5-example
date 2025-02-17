@@ -1,91 +1,115 @@
-import { useMemo, useEffect, useRef, useState } from 'react';
-import cx from 'clsx'
-
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import clsx from 'clsx';
 import './style.less';
 
-interface MarqueeTouchProps {
+interface MarqueeProps {
   repeat?: number;
   speed?: number;
-  children?: React.ReactNode;
+  children: React.ReactNode;
 }
 
-export default function MarqueeTouch({
+interface Style {
+  transform: string;
+  transition: string;
+  width?: string | number;
+}
+
+const Marquee: React.FC<MarqueeProps> = ({
   repeat = 4,
   speed = 0.5,
-  children,
-}: MarqueeTouchProps) {
+  children
+}) => {
   const [inview, setInview] = useState(false);
   const [paused, setPaused] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [ready, setReady] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [itemWidth, setItemWidth] = useState(0);
-  const [contentWidth, setContentWidth] = useState(0);
-  const [direction, setDirection] = useState(1);
   const [isRebounding, setIsRebounding] = useState(false);
+  const [contentWidth, setContentWidth] = useState(0);
 
-  const gap = 6;
-  const touchStartXRef = useRef(0);
-  const animationFrameRef = useRef<number>();
-  const intersectionObserverRef = useRef<IntersectionObserver>();
   const marqueeBoxRef = useRef<HTMLDivElement>(null);
-  const marqueeItemsRef = useRef<HTMLDivElement[]>([]);
   const marqueeContentRef = useRef<HTMLDivElement>(null);
+  const marqueeItemsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const animationFrameRef = useRef<number>();
+  const directionRef = useRef(1); // 1 for right, -1 for left
+  const touchStartXRef = useRef(0);
+  const itemWidthRef = useRef(0);
+  const offsetRef = useRef(0); // 用于动画中实时跟踪offset
+  const intersectionObserverRef = useRef<IntersectionObserver>();
 
-  const repeatData = Array(repeat)
-    .fill(0)
-    .map((_, index) => index);
+  const GAP = 6;
 
-  const contentStyle = useMemo(() => ({
-    transform: `translate(${offset}px, 0)`,
-    transition: 'all 0ms ease-in 0s',
-    width: `${contentWidth}px`,
-  }), [offset, contentWidth]);
-
-  const initSizes = () => {
-    if (marqueeItemsRef.current.length > 0) {
-      const newItemWidth = marqueeItemsRef.current[0].offsetWidth + gap;
-      setItemWidth(newItemWidth);
-      setContentWidth(newItemWidth * repeat);
+  const initSizes = useCallback(() => {
+    const firstItem = marqueeItemsRef.current[0];
+    if (!firstItem || firstItem.offsetWidth <= 0) {
+      setReady(false);
+      return;
     }
-  };
 
-  const handlePageVisibilityChange = () => {
-    const isPageVisible = document.visibilityState === 'visible';
-    setPaused(!isPageVisible);
-    if (isPageVisible) {
-      startAnimation();
-    } else {
-      stopAnimation();
-    }
-  };
+    setReady(true);
+    const itemWidth = firstItem.offsetWidth + GAP;
+    itemWidthRef.current = itemWidth;
+    setContentWidth(itemWidth * repeat);
+  }, [repeat]);
 
-  const startAnimation = () => {
+  const startAnimation = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
+
     const animate = () => {
-      if (!paused && inview && !isDragging && !isRebounding) {
-        setOffset((prev) => {
-          const newOffset = prev - speed * direction;
-          if (direction > 0 && newOffset <= -itemWidth) {
-            return 0;
-          } else if (direction < 0 && newOffset >= 0) {
-            return -itemWidth + speed;
-          }
-          return newOffset;
-        });
+      if (!ready) {
+        initSizes();
       }
+
+      if (!paused && inview && !isDragging && !isRebounding) {
+        const newOffset = offsetRef.current - speed * directionRef.current;
+        offsetRef.current = newOffset;
+        setOffset(newOffset);
+
+        if (directionRef.current > 0 && newOffset <= -itemWidthRef.current) {
+          offsetRef.current = 0;
+          setOffset(0);
+        } else if (directionRef.current < 0 && newOffset >= 0) {
+          offsetRef.current = -itemWidthRef.current + speed;
+          setOffset(-itemWidthRef.current + speed);
+        }
+      }
+
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
     animationFrameRef.current = requestAnimationFrame(animate);
-  };
+  }, [inview, isDragging, isRebounding, paused, ready, speed, initSizes]);
 
-  const stopAnimation = () => {
+  const stopAnimation = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-  };
+  }, []);
+
+  const reboundLeft = useCallback(() => {
+    setIsRebounding(true);
+    const startOffset = offsetRef.current;
+    const startTime = performance.now();
+    const duration = 300;
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      if (elapsed < duration) {
+        const newOffset = startOffset * (1 - elapsed / duration);
+        offsetRef.current = newOffset;
+        setOffset(newOffset);
+        requestAnimationFrame(animate);
+      } else {
+        offsetRef.current = 0;
+        setOffset(0);
+        setIsRebounding(false);
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }, []);
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartXRef.current = e.touches[0].clientX;
@@ -97,71 +121,52 @@ export default function MarqueeTouch({
     const touchCurrentX = e.touches[0].clientX;
     const deltaX = touchCurrentX - touchStartXRef.current;
 
-    setDirection(deltaX > 0 ? 1 : -1);
-    setOffset((prev) => {
-      const newOffset = prev + deltaX;
-      if (newOffset > 0) {
-        return Math.min(newOffset, itemWidth);
-      } else if (newOffset < -itemWidth) {
-        return Math.max(newOffset, -contentWidth);
-      }
-      return newOffset;
-    });
+    directionRef.current = deltaX > 0 ? 1 : -1;
+    const newOffset = offsetRef.current + deltaX;
 
+    // Constrain the offset
+    if (newOffset > 0) {
+      offsetRef.current = Math.min(newOffset, itemWidthRef.current);
+    } else if (newOffset < -itemWidthRef.current) {
+      offsetRef.current = Math.max(newOffset, -contentWidth);
+    } else {
+      offsetRef.current = newOffset;
+    }
+    setOffset(offsetRef.current);
     touchStartXRef.current = touchCurrentX;
-  };
-
-  const reboundLeft = () => {
-    setIsRebounding(true);
-    const startOffset = offset;
-    const startTime = performance.now();
-    const duration = 300;
-    const easeOutElastic = (x: number): number => {
-      const c4 = (2 * Math.PI) / 3;
-      return x === 0
-        ? 0
-        : x === 1
-          ? 1
-          : Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1;
-    };
-
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      if (progress < 1) {
-        const easeValue = easeOutElastic(progress);
-        setOffset(startOffset * (1 - easeValue));
-        requestAnimationFrame(animate);
-      } else {
-        setOffset(0);
-        setIsRebounding(false);
-      }
-    };
-
-    requestAnimationFrame(animate);
   };
 
   const handleTouchEnd = () => {
     setIsDragging(false);
-    if (offset > 0) {
+    if (offsetRef.current > 0) {
       reboundLeft();
-    } else if (offset < -itemWidth) {
-      setOffset((prev) => prev + itemWidth);
+    } else if (offsetRef.current < -itemWidthRef.current) {
+      const newOffset = offsetRef.current + itemWidthRef.current;
+      offsetRef.current = newOffset;
+      setOffset(newOffset);
     }
-    setTimeout(() => {
-      setDirection(1);
-    }, 0);
+    directionRef.current = 1;
   };
 
   useEffect(() => {
-    initSizes();
-    startAnimation();
+    const handlePageVisibilityChange = () => {
+      const isHidden = document.visibilityState !== 'visible';
+      setPaused(isHidden);
+      if (isHidden) {
+        stopAnimation();
+      } else {
+        startAnimation();
+      }
+    };
 
-    window.addEventListener('resize', initSizes);
     document.addEventListener('visibilitychange', handlePageVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handlePageVisibilityChange);
+    };
+  }, [startAnimation, stopAnimation]);
 
-    if ('IntersectionObserver' in window) {
+  useEffect(() => {
+    if ('IntersectionObserver' in window && marqueeBoxRef.current) {
       intersectionObserverRef.current = new IntersectionObserver((entries) => {
         entries.forEach((entry) => {
           setInview(entry.isIntersecting);
@@ -174,28 +179,34 @@ export default function MarqueeTouch({
         });
       });
 
-      if (marqueeBoxRef.current) {
-        intersectionObserverRef.current.observe(marqueeBoxRef.current);
-      }
+      intersectionObserverRef.current.observe(marqueeBoxRef.current);
     }
 
     return () => {
-      stopAnimation();
-      window.removeEventListener('resize', initSizes);
-      document.removeEventListener(
-        'visibilitychange',
-        handlePageVisibilityChange,
-      );
       if (intersectionObserverRef.current) {
         intersectionObserverRef.current.disconnect();
       }
     };
-  }, []);
+  }, [initSizes, startAnimation, stopAnimation]);
+
+  useEffect(() => {
+    window.addEventListener('resize', initSizes);
+    return () => {
+      window.removeEventListener('resize', initSizes);
+      stopAnimation();
+    };
+  }, [initSizes, stopAnimation]);
+
+  const contentStyle: Style = {
+    transform: `translate(${offset}px, 0)`,
+    transition: 'all 0ms ease-in 0s',
+    width: contentWidth || '100%',
+  };
 
   return (
     <div
       ref={marqueeBoxRef}
-      className={cx('marquee-box', {
+      className={clsx('marquee-touch-box', {
         inview: inview,
         'no-inview': !inview,
         'animation-paused': paused,
@@ -204,23 +215,21 @@ export default function MarqueeTouch({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      <div
-        ref={marqueeContentRef}
-        className="marquee-content"
-        style={contentStyle}
-      >
-        {repeatData.map((item) => (
-          <div
-            key={item}
-            ref={(el) => {
-              if (el) marqueeItemsRef.current[item] = el;
-            }}
-            className="marquee-item"
-          >
-            {children}
-          </div>
-        ))}
+      <div className="marquee-content" ref={marqueeContentRef} style={contentStyle}>
+        {Array(repeat)
+          .fill(0)
+          .map((_, index) => (
+            <div
+              key={index}
+              ref={(el) => (marqueeItemsRef.current[index] = el)}
+              className="marquee-item"
+            >
+              {children}
+            </div>
+          ))}
       </div>
     </div>
   );
-}
+};
+
+export default Marquee;
